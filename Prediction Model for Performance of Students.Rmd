@@ -1,0 +1,307 @@
+---
+title: "Predicting the performance of Students"
+author: "Dhivya Rajprasad"
+Date: Sys.date()
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#**Synopsis**
+**Problem Statement**               
+This project aims to find out the influence of various variables and parameters on the grade of a secondary school student.      
+The dataset is extensive with atleast 33 different variables which are then filtered for the most obvious predictors and analysis is performed to understand the influence of these predictors on the final grades of the students.
+
+**Methodology Employed**                     
+1. Simple Exploratory Analysis           
+2. Interesting Visualizations                                       
+3. Decision tree algorithm 
+
+**Interesting Insights**      
+Some interesting insights were discovered on the following parameters:                  
+1. Gender Based                             
+2. Alcohol consumption          
+3. Goals of the student       
+4. Health and attendance in class                  
+5. Access to internet
+
+#**Packages Used**
+```{r, comments=NA, message=FALSE, warning=FALSE}
+library(prettydoc) #template
+library(readr) #for reading in the data
+library(dplyr) #exploratory data analysis
+library(ggplot2)#visualizations
+library(tidyverse)#tidying up the data and exploratory data analysis
+library(gsheet)#Reading from google sheets
+library(readxl) #Reading in Excel Files
+library(knitr) #Kable function for printing tables
+library(DT) #Printing dataframes concisely
+library(caret) #Dummy Variables for Correlation Matrix
+library(gridExtra) #Multiple plots 
+library(rpart) #Decision Tree
+
+```
+
+
+#**Data Import**
+We import the data saved as a zip file from the UCI archives using `download.file` command which is then unzipped using `unzip` into the csv file for math scores.    
+The file is read in to R using `read.table` and merged to produce the `data` which will be used for the project.
+```{r, comment=NA}
+temp <- tempfile()
+download.file("http://archive.ics.uci.edu/ml/machine-learning-databases/00356/student.zip",temp, mode="wb")
+unzip(temp, "student-mat.csv")
+data <- read.table("student-mat.csv",sep= ";", header= T)
+unlink(temp)
+(data <- as_tibble(data))
+```
+           
+#**Source Code**       
+
+##Description of the data
+The dataset is composed of data from two Portuguese Schools namely,  Gabriel Pereira HS and Mousinho da Silveira HS and measures the performance in Math.     
+The dataset is composed of detailed observation for each student across multiple variables like family status and size, performance, alcohol consumption, student's work situation, parents job situation etc.        
+The dataset was obtained as part of the study for using [Data Mining to Predict Secondary School Student Performance by P.Cortez and A.Silva](http://repositorium.sdum.uminho.pt/handle/1822/8024?locale=en) from two public schools in the school year 2005-2006 from the Alentejo Region of Portugal.
+Citation:            
+Using Data Mining To Predict Secondary School Student Alcohol Consumption.        
+Fabio Pagnotta, Hossain Mohammad Amran          
+Department of Computer Science,University of Camerino           
+Two different sources were used:       
+1. Mark Reports       
+2. Questionnaires       
+The first source had scarce information of grades and attendance details and is complemented with the second source which provides the other variables to the data.
+
+##Sampling Information
+The questionaires were answered by 788 students in total and 111 answers were discarded due to lack of identification to merge with the mark reports.        
+The data was then integrated into two different datasets : Mathematics(395 observations) and Portuguese(649 observations).       
+**For the purpose of this project, we will be using the math dataset only.**
+
+
+##Structure and Details of the data
+The codebook and data description is provided in the [UCI Machine Learning Database](http://archive.ics.uci.edu/ml/datasets/STUDENT+ALCOHOL+CONSUMPTION#)     
+The variables and their classifications are as given below:      
+```{r, results= 'asis', message=FALSE, warning=FALSE}
+variablelist <- gsheet2tbl('https://docs.google.com/spreadsheets/d/1mDsF0aMNgODx7063l2mxV1_zP32fAe_P55SBmtG72G8')
+kable(variablelist)
+```
+
+Missing data:
+There is no missing data in the dataset.
+```{r, comment=NA}
+sum(is.na(data))
+```
+
+#**Data Cleaning**
+The data is already cleaned and in a tidy format and does not require much cleaning for the data analysis. The majority of the cleaning is done for selecting the necessary variables.
+```{r, comment=NA}
+data <- data %>%
+  as_tibble()%>%
+  select(sex, age, address,Pstatus, Medu, Fedu, Mjob, Fjob,studytime,traveltime,failures,higher,internet, 
+         goout, Dalc,Walc,health, absences,G1,G2,G3)
+DT::datatable(data)
+```
+Effectively, the number of variables that will be used for the analysis has reduced to 21 from 33.
+
+#**Data Description**
+**Summary Statistics**:    
+
+We have chosen 18  different variables as predictors or independant variables which are presented as:                             
+7 categorical variables and 11 numerical variables,    
+
+We have also chosen 3 variables as predicted or dependant variables which are presented as:       
+3 numerical variables- numerical grades of students 
+for exploratory data analysis.
+```{r, comment=NA, message= NA}
+glimpse(data)
+```
+
+Summary:
+```{r, comment=NA}
+summary(data)
+```
+#**Simple Exploratory Data Analysis**
+
+1. Number of Male vs Female Students who failed in the final exam
+```{r, comment=NA, message=FALSE, warning=FALSE}
+  
+(data2<-data%>%
+ mutate(pass=ifelse(G3>=10,1,0), fail= ifelse(G3<10,1,0))%>%
+  filter(sex=="F"|sex=="M")%>%
+  group_by(sex)%>%
+  summarise(Pass=sum(pass), 
+            Fail=sum(fail)))
+data2%>%
+  ggplot(aes(x=sex,y=Fail))+
+  geom_bar(stat="identity")
+
+```
+
+We find that the number of female students who have failed is higher than the number of male students who have failed.
+
+2. Average Final Score across different weekend and weekday alcohol consumption levels
+```{r, comment=NA, message=FALSE, warning=FALSE}
+data%>%
+   group_by(Walc)%>%
+  aggregate(G3~Walc, data=., mean)%>%
+  arrange(desc(G3))
+
+data%>%
+   group_by(Dalc)%>%
+  aggregate(G3~Dalc, data=., mean)%>%
+  arrange(desc(G3))
+```
+We find that the average grade decreases as the alcohol consumption in weekend increases whereas a very clear trend cannot be established for Weekday.
+
+3. Relationship between going out and average grade of the students
+```{r, comment=NA, message=FALSE, warning=FALSE}
+data$goout <- as.factor(data$goout)
+data%>%
+   group_by(goout)%>%
+   summarise(AverageScore= mean(G3,na.rm=TRUE))%>%
+  arrange(desc(AverageScore))
+```
+
+We see that Going Out does have an impact on the average grades in the final exam as the number of days of going out increases beyond 3, the average grades of students are also decreasing.
+
+
+#**Data Analysis Through Visualizations**
+This project will concentrate on several aspects which will affect a students performance and correlation between these factors.
+
+1. Correlation between alcohol consumption and performance of the students with differences in gender              
+```{r, comment=NA, message=FALSE, warning=FALSE}
+dmy <- dummyVars("~.", data=data)
+newdata <- data.frame(predict(dmy, newdata=data))
+correl1 <-cor(newdata[,c("G3","sex.F","sex.M","Walc","Dalc")])
+source("https://raw.githubusercontent.com/briatte/ggcorr/master/ggcorr.R")
+correl1 %>%
+  ggcorr(label = TRUE)+ ggtitle("Correlation between Alcohol Consumption,Gender and Performance")
+```
+
+We find that Gender has a lower correlation with respect to performance as compared to Alcohol Consumption. We find that both Weekend and Workday Alchol Consumption is highly negatively correlated with the grades.
+```{r, comment=NA, message=FALSE, warning=FALSE}
+data$Dalc <- as.factor(data$Dalc)
+data$Walc <- as.factor(data$Walc)
+g1a<-data %>%
+  ggplot(aes(x=Dalc, y=G3, fill= Dalc))+
+  geom_boxplot()+
+  coord_flip()+
+      xlab("Work Day Alcohol consumption")+
+      ylab("Grade")+
+  facet_grid(~sex)
+g1b<-data %>%
+  ggplot(aes(x=Walc, y=G3, fill= Walc))+
+  geom_boxplot()+
+  coord_flip()+
+      xlab("Week End Alcohol consumption")+
+      ylab("Grade")+
+  facet_grid(~sex)
+grid.arrange(g1a,g1b,ncol=2)
+```
+
+2. Relationship between the consumption of alcohol by students and the set up in which they live :urban vs rural and the relationship to performance in school. 
+```{r, warning=FALSE, comment=NA}
+ g2a<-data %>% 
+  group_by(address)%>%
+  ggplot(aes(x=factor(Dalc), y= G3))+
+           geom_jitter(alpha=0.6)+
+    scale_x_discrete("WorkDay Alcohol")+
+    scale_y_continuous("Grade")+
+    facet_grid(~address)
+ g2b<-data %>% 
+   group_by(address)%>%
+   ggplot(aes(x=factor(Walc), y= G3))+
+           geom_jitter(alpha=0.6)+
+    scale_x_discrete("Weekday Alcohol")+
+    scale_y_continuous("Grade")+
+    facet_grid(~address)
+grid.arrange(g2a,g2b,ncol=2)
+```
+
+We see that students from Urban Areas have more alcohol consumption than students from Rural Areas. We also find that the final grades start decreasing as the level of alcohol consumption increases.
+
+3. The current performance Vs future goals of the student based on gender of the student   
+```{r, warning=FALSE, comment=NA}
+data%>%
+  ggplot(aes(x=higher, y=G3))+
+  geom_boxplot()+
+  facet_grid(~sex)
+```
+
+We find that on an average, students who are planning on a higher education perform better than those who do not. We also find that Male students outperform female students when they plan to go for higher education and viceversa if not.
+
+4. The relationship between health and attendance in class and the gender of the student.                     
+```{r, warning=FALSE, comment=NA}
+data%>%
+  group_by(sex)%>%
+  ggplot(aes(x=factor(health), y=absences, color=sex))+
+  geom_smooth(aes(group=sex), method="lm", se=FALSE)
+```
+
+We find that female students have lower attendance on average and as the health scale increases, the absence decreases as expected for both male and female students.
+
+5. Relationship between access to internet and the performance of the students.             
+```{r, warning=FALSE, comment=NA}
+data%>%
+  group_by(internet)%>%
+  ggplot(aes(x=G3, fill=internet))+
+  geom_density( alpha=0.5)
+```
+
+We find that the presence of internet is actually detrimental to the average grades of the student.
+
+#**Decision Tree Analysis**
+
+We use R to create Decision Trees to predict the final performance grade using all the variables in the dataset.             
+
+##Methodology Used          
+Classification methodology was used for this particular data and the the response variable grade is modeled as a binary variable.            
+
+##Advantages of using Decision Trees for this Analysis      
+**Simplicity of Interpretation**: The entire data is represented in a visual format which enables us to understand the data quickly and make a prediction.                       
+**Ability to use both numeric and categorical variables as predictors**: Our data is a mix of categorical and numeric variables and other commonly used methods such as linear or logistic regressions can use either of these categories but not both in a single algorithm.            
+
+##Algorithm behind             
+The package used to construct the tree here is Rpart which uses recursive partitioning of the data with the default criterion being used for each split being Gini Coefficient.  
+
+##Variables used                
+We create the tree using all the variables and rank the variables in terms of importance to figure out the variables used by the decision tree algorithm to predict the income.          
+```{r,comment=NA, message=NA}
+
+library(caret)
+newdata<- data%>%select(sex, age, address,Pstatus, Medu, Fedu, Mjob, Fjob,studytime,traveltime,failures,higher,internet, 
+         goout, Dalc,Walc,health, absences,G1, G2, G3)
+tree <- rpart(G3 ~ .,
+              data = newdata,
+              method = "class")
+imp <- varImp(tree)
+rownames(imp)[order(imp$Overall, decreasing=TRUE)]
+```
+We find that Grades in 1st and 2nd exam are key predictors followed by attendance levls,alcohol consumption and jobs of parents.                       
+The tree logic is as below where only “attendance, Father's job, Grades in 1st and 2nd Exam” are used as variables by the tree based on correlation and collinearity between some of the other variables.               
+```{r, comment=NA, message=NA}
+printcp(tree)
+plotcp(tree)
+```
+
+#**Summary**
+
+**Problem Statement**                                 
+We find that some variables are highly correlated with others and hence do not make a significant impact in predicting the final grades.
+Different tabular and visual interpretations were made to analyze the relatioship between the different variables towards predicting or influencing the grade of a student.
+
+**Methodology Used**                                  
+1. Simple Exploratory Analysis is first done to slice and dice the data for different predictors and results are presented in tables.            
+2. Interesting Visualizations are employed to find out the inter relationship between different varaiables and hence their effect on the grades and other factors.                                        
+3. Decision tree algorithm is used to predict the grades based on certain important variables as chosen by the algorithm due to the correlation and collinearity exhibited by the variables.
+
+**Insights Provided**                       
+1.**Gender Based**: We find that more female students tend to fail in the final exam as compared to male students but the gender does not seem to have as much as a correlation to predict the grades as alcohol consumption. We also find the attendance level of female students is lesser than male students and male students with a plan of higher education outperform female students.                    
+2.**Alcohol consumption**: We find a clear detrimental impact on grades due to the consumption of alcohol during weekend but a clear trend cannot be established for weekdays. The alcohol consumption also increases in urban settings when compared to rural settings.       
+3.**Goals of the student**: We find that on an average, students who are planning on a higher education perform better than those who do not.              
+4.**Health and attendance in class**: As expected, as health condition detoriates, we find that the number of absences increases.          
+5. **Access to internet**: Access to internet has a detroriating effect on the performance of the students as their average grades are lesser than those without access to internet.
+
+We find that the variables which actually impact the prediction of final grades are Absences, Fathers' job and Grades in Exam 1 and Exam 2 as found in decision trees algorithm.
